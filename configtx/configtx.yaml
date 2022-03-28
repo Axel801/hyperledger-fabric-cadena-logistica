@@ -25,7 +25,7 @@ Organizations:
         ID: OrdererMSP
 
         # MSPDir is the filesystem path which contains the MSP configuration
-        MSPDir: ../organizations/ordererOrganizations/example.com/msp
+        MSPDir: ../organizations/ordererOrganizations/farma.com/msp
 
         # Policies defines the set of policies at this level of the config tree
         # For organization policies, their canonical path is usually
@@ -42,17 +42,17 @@ Organizations:
                 Rule: "OR('OrdererMSP.admin')"
 
         OrdererEndpoints:
-            - orderer.example.com:7050
+            - orderer.farma.com:7050
 
-    - &Org1
+    - &Moderno
         # DefaultOrg defines the organization which is used in the sampleconfig
         # of the fabric.git development environment
-        Name: Org1MSP
+        Name: ModernoMSP
 
         # ID to load the MSP definition as
-        ID: Org1MSP
+        ID: ModernoMSP
 
-        MSPDir: ../organizations/peerOrganizations/org1.example.com/msp
+        MSPDir: ../organizations/peerOrganizations/moderno.farma.com/msp
 
         # Policies defines the set of policies at this level of the config tree
         # For organization policies, their canonical path is usually
@@ -60,26 +60,26 @@ Organizations:
         Policies:
             Readers:
                 Type: Signature
-                Rule: "OR('Org1MSP.admin', 'Org1MSP.peer', 'Org1MSP.client')"
+                Rule: "OR('ModernoMSP.admin', 'ModernoMSP.peer', 'ModernoMSP.client')"
             Writers:
                 Type: Signature
-                Rule: "OR('Org1MSP.admin', 'Org1MSP.client')"
+                Rule: "OR('ModernoMSP.admin', 'ModernoMSP.client')"
             Admins:
                 Type: Signature
-                Rule: "OR('Org1MSP.admin')"
+                Rule: "OR('ModernoMSP.admin')"
             Endorsement:
                 Type: Signature
-                Rule: "OR('Org1MSP.peer')"
+                Rule: "OR('ModernoMSP.peer')"
 
-    - &Org2
+    - &Logistica
         # DefaultOrg defines the organization which is used in the sampleconfig
         # of the fabric.git development environment
-        Name: Org2MSP
+        Name: LogisticaMSP
 
         # ID to load the MSP definition as
-        ID: Org2MSP
+        ID: LogisticaMSP
 
-        MSPDir: ../organizations/peerOrganizations/org2.example.com/msp
+        MSPDir: ../organizations/peerOrganizations/logistica.farma.com/msp
 
         # Policies defines the set of policies at this level of the config tree
         # For organization policies, their canonical path is usually
@@ -87,25 +87,26 @@ Organizations:
         Policies:
             Readers:
                 Type: Signature
-                Rule: "OR('Org2MSP.admin', 'Org2MSP.peer', 'Org2MSP.client')"
+                Rule: "OR('LogisticaMSP.admin', 'LogisticaMSP.peer', 'LogisticaMSP.client')"
             Writers:
                 Type: Signature
-                Rule: "OR('Org2MSP.admin', 'Org2MSP.client')"
+                Rule: "OR('LogisticaMSP.admin', 'LogisticaMSP.client')"
             Admins:
                 Type: Signature
-                Rule: "OR('Org2MSP.admin')"
+                Rule: "OR('LogisticaMSP.admin')"
             Endorsement:
                 Type: Signature
-                Rule: "OR('Org2MSP.peer')"
-    - &Org3
+                Rule: "OR('LogisticaMSP.peer')"
+
+    - &Delivery
         # DefaultOrg defines the organization which is used in the sampleconfig
         # of the fabric.git development environment
-        Name: Org3MSP
+        Name: DeliveryMSP
 
         # ID to load the MSP definition as
-        ID: Org3MSP
+        ID: DeliveryMSP
 
-        MSPDir: ../organizations/peerOrganizations/org3.example.com/msp
+        MSPDir: ../organizations/peerOrganizations/delivery.farma.com/msp
 
         # Policies defines the set of policies at this level of the config tree
         # For organization policies, their canonical path is usually
@@ -113,16 +114,16 @@ Organizations:
         Policies:
             Readers:
                 Type: Signature
-                Rule: "OR('Org3MSP.admin', 'Org3MSP.peer', 'Org3MSP.client')"
+                Rule: "OR('DeliveryMSP.admin', 'DeliveryMSP.peer', 'DeliveryMSP.client')"
             Writers:
                 Type: Signature
-                Rule: "OR('Org3MSP.admin', 'Org3MSP.client')"
+                Rule: "OR('DeliveryMSP.admin', 'DeliveryMSP.client')"
             Admins:
                 Type: Signature
-                Rule: "OR('Org3MSP.admin')"
+                Rule: "OR('DeliveryMSP.admin')"
             Endorsement:
                 Type: Signature
-                Rule: "OR('Org3MSP.peer')"
+                Rule: "OR('DeliveryMSP.peer')"
 
 ################################################################################
 #
@@ -234,14 +235,21 @@ Orderer: &OrdererDefaults
     # as TLS validation.  The preferred way to specify orderer addresses is now
     # to include the OrdererEndpoints item in your org definition
     Addresses:
-        - orderer.example.com:7050
+        - orderer.farma.com:7050
 
     EtcdRaft:
         Consenters:
-        - Host: orderer.example.com
+        - Host: orderer.farma.com
           Port: 7050
-          ClientTLSCert: ../organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
-          ServerTLSCert: ../organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+          ClientTLSCert: ../organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/tls/server.crt
+          ServerTLSCert: ../organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/tls/server.crt
+
+        Options:
+            TickInterval: 2500ms
+            ElectionTick: 5
+            HeartbeatTick: 1
+            MaxInflightBlocks: 5
+            SnapshotIntervalSize: 16 MB
 
     # Batch Timeout: The amount of time to wait before creating a batch
     BatchTimeout: 2s
@@ -326,7 +334,7 @@ Channel: &ChannelDefaults
 ################################################################################
 Profiles:
 
-    TwoOrgsApplicationGenesis:
+    FarmaApplicationGenesis:
         <<: *ChannelDefaults
         Orderer:
             <<: *OrdererDefaults
@@ -336,11 +344,12 @@ Profiles:
         Application:
             <<: *ApplicationDefaults
             Organizations:
-                - *Org1
-                - *Org2
+                - *Moderno
+                - *Logistica
+                - *Delivery
             Capabilities: *ApplicationCapabilities
 
-    NewCursoGenesis:
+    VentasGenesis:
         <<: *ChannelDefaults
         Orderer:
             <<: *OrdererDefaults
@@ -350,24 +359,7 @@ Profiles:
         Application:
             <<: *ApplicationDefaults
             Organizations:
-                - *Org1
-                - *Org2
+                - *Moderno
+                - *Delivery
             Capabilities: *ApplicationCapabilities
-            
-    ThreeGenesis:
-        <<: *ChannelDefaults
-        Orderer:
-            <<: *OrdererDefaults
-            Organizations:
-                - *OrdererOrg
-            Capabilities: *OrdererCapabilities
-        Application:
-            <<: *ApplicationDefaults
-            Organizations:
-                - *Org1
-                - *Org2
-                - *Org3
-            Capabilities: *ApplicationCapabilities
-
-
 
