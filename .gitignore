@@ -1,0 +1,8 @@
+vendor/
+channel-artifacts/
+organizations/fabric-ca/delivery/
+organizations/fabric-ca/logistica/
+organizations/fabric-ca/moderno/
+organizations/fabric-ca/ordererOrg/
+organizations/ordererOrganizations/
+organizations/peerOrganizations/
