@@ -1,0 +1,469 @@
+CASO PRÁCTICO II
+
+
+
+CREACIÓN DE UN PROYECTO DE TRAZABILIDAD DE FÁRMACOS
+
+
+
+--> PENSAR LA ARQUITECTURA
+
+
+
+--> DEFINIR LA LÓGICA DE NEGOCIO
+
+
+
+--> PENSAR LA LÓGICA - SMART CONTRACT
+
+
+
+--> CONECTAR A LA APOLICACIÓN WEB O CONSTRUIR LA APLICACIÓN WEB
+
+
+
+//CREAR ARCHIVOS DE CONFIGURACIÓN
+
+cd ~/curso
+
+
+
+vi ~/curso/compose/compose-farma-ca.yaml 
+
+
+
+docker stop $(docker ps -a -q)
+
+docker rm $(docker ps -a -q)
+
+docker volume prune
+
+docker network prune
+
+
+
+sudo rm -rf organizations/fabric-ca/moderno/
+
+sudo rm -rf organizations/fabric-ca/logistica/
+
+sudo rm -rf organizations/fabric-ca/delivery/
+
+sudo rm -rf organizations/fabric-ca/ordererOrg/
+
+sudo rm -rf organizations/peerOrganizations
+
+sudo rm -rf organizations/ordererOrganizations
+
+sudo rm -rf channel-artifacts/
+
+mkdir channel-artifacts
+
+
+
+docker-compose -f compose/compose-farma-ca.yaml up -d
+
+
+
+export PATH=${PWD}/../fabric-samples/bin:${PWD}:$PATH
+
+export FABRIC_CFG_PATH=${PWD}/configtx
+
+
+
+. ./organizations/fabric-ca/registerEnrollFarma.sh && createModerno
+
+. ./organizations/fabric-ca/registerEnrollFarma.sh && createLogistica
+
+. ./organizations/fabric-ca/registerEnrollFarma.sh && createDelivery
+
+. ./organizations/fabric-ca/registerEnrollFarma.sh && createOrderer
+
+
+
+
+
+configtxgen -profile FarmaApplicationGenesis -outputBlock ./channel-artifacts/farmachannel.block -channelID farmachannel
+
+configtxgen -profile VentasGenesis -outputBlock ./channel-artifacts/ventaschannel.block -channelID ventaschannel
+
+export FABRIC_CFG_PATH=${PWD}/../fabric-samples/config
+
+export ORDERER_CA=${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+export ORDERER_ADMIN_TLS_SIGN_CERT=${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/tls/server.crt
+
+export ORDERER_ADMIN_TLS_PRIVATE_KEY=${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/tls/server.key
+
+
+
+docker-compose -f compose/compose-farma.yaml  up -d
+
+
+
+osnadmin channel join --channelID farmachannel --config-block ./channel-artifacts/farmachannel.block -o localhost:7053 --ca-file "$ORDERER_CA" --client-cert "$ORDERER_ADMIN_TLS_SIGN_CERT" --client-key "$ORDERER_ADMIN_TLS_PRIVATE_KEY"
+
+osnadmin channel join --channelID ventaschannel --config-block ./channel-artifacts/ventaschannel.block -o localhost:7053 --ca-file "$ORDERER_CA" --client-cert "$ORDERER_ADMIN_TLS_SIGN_CERT" --client-key "$ORDERER_ADMIN_TLS_PRIVATE_KEY"
+
+osnadmin channel list -o localhost:7053 --ca-file "$ORDERER_CA" --client-cert "$ORDERER_ADMIN_TLS_SIGN_CERT" --client-key "$ORDERER_ADMIN_TLS_PRIVATE_KEY"
+
+
+
+#Añadimos los NODOS de la empresa MODERNO a los dos canales
+
+# NODO 0
+
+export CORE_PEER_TLS_ENABLED=true
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="ModernoMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/moderno.farma.com/users/Admin@moderno.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:7051
+
+peer channel join -b ./channel-artifacts/farmachannel.block
+
+peer channel join -b ./channel-artifacts/ventaschannel.block
+
+# NODO 1
+
+export PEER1_EMPRESA_CA=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer1.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER1_EMPRESA_CA
+
+export CORE_PEER_ADDRESS=localhost:3051
+
+peer channel join -b ./channel-artifacts/farmachannel.block
+
+peer channel join -b ./channel-artifacts/ventaschannel.block
+
+
+
+#FIJAR UN ANCHOR PEER ya que en la politica de endorsment de ventasChannel tenemos puesto que las dos empresas confirmen la TX
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="ModernoMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/moderno.farma.com/users/Admin@moderno.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:7051
+
+
+
+peer channel fetch config channel-artifacts/config_block.pb -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com -c farmachannel --tls --cafile "$ORDERER_CA"
+
+
+
+cd channel-artifacts
+
+
+
+configtxlator proto_decode --input config_block.pb --type common.Block --output config_block.json
+
+
+
+jq '.data.data[0].payload.data.config' config_block.json > config.json
+
+cp config.json config_copy.json
+
+jq '.channel_group.groups.Application.groups.ModernoMSP.values += {"AnchorPeers":{"mod_policy": "Admins","value":{"anchor_peers": [{"host": "peer0.moderno.farma.com","port": 7051}]},"version": "0"}}' config_copy.json > modified_config.json
+
+
+
+configtxlator proto_encode --input config.json --type common.Config --output config.pb
+
+configtxlator proto_encode --input modified_config.json --type common.Config --output modified_config.pb
+
+
+
+configtxlator compute_update --channel_id farmachannel --original config.pb --updated modified_config.pb --output config_update.pb
+
+
+
+configtxlator proto_decode --input config_update.pb --type common.ConfigUpdate --output config_update.json
+
+echo '{"payload":{"header":{"channel_header":{"channel_id":"farmachannel", "type":2}},"data":{"config_update":'$(cat config_update.json)'}}}' | jq . > config_update_in_envelope.json
+
+
+
+configtxlator proto_encode --input config_update_in_envelope.json --type common.Envelope --output config_update_in_envelope.pb
+
+
+
+cd ..
+
+
+
+peer channel update -f channel-artifacts/config_update_in_envelope.pb -c farmachannel -o localhost:7050  --ordererTLSHostnameOverride orderer.farma.com --tls --cafile "${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem"
+
+
+
+
+
+#Añadimos la empresa LOGISTICA
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/logistica.farma.com/peers/peer0.logistica.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="LogisticaMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/logistica.farma.com/users/Admin@logistica.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:9051
+
+peer channel join -b ./channel-artifacts/farmachannel.block
+
+
+
+#Añadimos la empresa DELIVERY a los dos canales
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="DeliveryMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/delivery.farma.com/users/Admin@delivery.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:2051
+
+peer channel join -b ./channel-artifacts/farmachannel.block
+
+peer channel join -b ./channel-artifacts/ventaschannel.block
+
+
+
+
+
+# ----------------------- CHAIN CODES -----------------------
+
+
+
+vi ~/curso/chaincodes/farma/ventas/go/ventas.go
+
+vi ~/curso/chaincodes/farma/trazabilidad/go/trazabilidad.go
+
+
+
+cd ~/curso/chaincodes/farma/ventas/go/
+
+go mod init ventas.go 
+
+go mod vendor
+
+
+
+cd ~/curso
+
+export PATH=${PWD}/../fabric-samples/bin:${PWD}:$PATH
+
+export FABRIC_CFG_PATH=${PWD}/../fabric-samples/config
+
+
+
+peer version
+
+peer lifecycle chaincode package ventas.tar.gz --path chaincodes/farma/ventas/go --lang golang --label ventas_1.0
+
+# Desplegamos el chaincode VENTAS en el nodo 0 y 1 de la empresa MODERNO
+
+# NODO 0
+
+export CORE_PEER_TLS_ENABLED=true
+
+export CORE_PEER_LOCALMSPID="ModernoMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/moderno.farma.com/users/Admin@moderno.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:7051
+
+peer lifecycle chaincode install ventas.tar.gz
+
+
+
+# NODO 1
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="DeliveryMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/delivery.farma.com/users/Admin@delivery.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:2051
+
+peer lifecycle chaincode install ventas.tar.gz
+
+
+
+peer lifecycle chaincode queryinstalled
+
+//copiar el ID del package, es una combinación del nombre del chaincode y el ventas del contenido del código
+
+export CC_PACKAGE_ID=ventas_1.0:ff295fa6d43f2f4badc69e12de0228a27c30f02300e534f41075d627b37fb0b3
+
+peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID ventaschannel --name ventas --version 1.0 --package-id $CC_PACKAGE_ID --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+
+
+export CORE_PEER_LOCALMSPID="ModernoMSP"
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/moderno.farma.com/users/Admin@moderno.farma.com/msp
+
+export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_ADDRESS=localhost:7051
+
+peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID ventaschannel  --name ventas --version 1.0 --package-id $CC_PACKAGE_ID --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+peer lifecycle chaincode checkcommitreadiness --channelID ventaschannel --name ventas --version 1.0 --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem --output json
+
+
+
+peer lifecycle chaincode commit -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID ventaschannel --name ventas --version 1.0 --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt --peerAddresses localhost:2051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt
+
+
+
+peer lifecycle chaincode querycommitted --channelID ventaschannel --name ventas --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+# Probar el chaincode o por el http://localhost:5984/_utils/
+
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem -C ventaschannel -n ventas --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt --peerAddresses localhost:2051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt -c '{"function":"initLedger","Args":[""]}'
+
+
+
+peer chaincode query -C ventaschannel -n ventas -c '{"Args":["ReadTransaccion","T1"]}'
+
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem -C ventaschannel -n ventas --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt --peerAddresses localhost:2051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt -c '{"function":"UpdateTransaccion","Args":["T1","23423","600","500"]}'
+
+peer chaincode query -C ventaschannel -n ventas -c '{"Args":["ReadTransaccion","T1"]}'
+
+
+
+
+
+
+
+--> CHAINCODE DE TRAZABILIDAD
+
+
+
+cd ~/curso/chaincodes/farma/trazabilidad/go/
+
+go mod init trazabilidad.go 
+
+go mod vendor
+
+
+
+cd ~/curso
+
+export PATH=${PWD}/../fabric-samples/bin:${PWD}:$PATH
+
+export FABRIC_CFG_PATH=${PWD}/../fabric-samples/config
+
+
+
+peer version
+
+peer lifecycle chaincode package trazabilidad.tar.gz --path chaincodes/farma/trazabilidad/go --lang golang --label trazabilidad_1.0
+
+
+
+# Añado el chaincode a la empresa MODERNO nodo 0
+
+export CORE_PEER_TLS_ENABLED=true
+
+export CORE_PEER_LOCALMSPID="ModernoMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/moderno.farma.com/users/Admin@moderno.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:7051
+
+peer lifecycle chaincode install trazabilidad.tar.gz
+
+
+
+peer lifecycle chaincode queryinstalled
+
+//copiar el ID del package, es una combinación del nombre del chaincode y el trazabilidad del contenido del código
+
+export CC_PACKAGE_ID=trazabilidad_1.0:011a2bb8c139dbf8ef3c5de4c07cca5a32210682e52049f36d32e5b080e6ab99
+
+# En las --signature-policy se tuvo que poner un OR para que cuando se realice una TX los 3 no ejecuten el uuid del metodo new, sino con que uno lo realice sea suficiente
+
+peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID farmachannel --name trazabilidad --signature-policy "OR('ModernoMSP.member','DeliveryMSP.member','LogisticaMSP.member')" --version 1.0 --package-id $CC_PACKAGE_ID --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+# Añado el chaincode a la empresa DELIVERY
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="DeliveryMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/delivery.farma.com/users/Admin@delivery.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:2051
+
+peer lifecycle chaincode install trazabilidad.tar.gz
+
+peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID farmachannel --name trazabilidad --signature-policy "OR('ModernoMSP.member','DeliveryMSP.member','LogisticaMSP.member')" --version 1.0 --package-id $CC_PACKAGE_ID --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+# Añado el chaincode a la empresa logística
+
+export PEER0_EMPRESA_CA=${PWD}/organizations/peerOrganizations/logistica.farma.com/peers/peer0.logistica.farma.com/tls/ca.crt
+
+export CORE_PEER_LOCALMSPID="LogisticaMSP"
+
+export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_EMPRESA_CA
+
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/logistica.farma.com/users/Admin@logistica.farma.com/msp
+
+export CORE_PEER_ADDRESS=localhost:9051
+
+peer lifecycle chaincode install trazabilidad.tar.gz
+
+peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID farmachannel --name trazabilidad --signature-policy "OR('ModernoMSP.member','DeliveryMSP.member','LogisticaMSP.member')" --version 1.0 --package-id $CC_PACKAGE_ID --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+peer lifecycle chaincode checkcommitreadiness --channelID farmachannel --name trazabilidad --version 1.0 --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem --output json
+
+
+
+peer lifecycle chaincode commit -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --channelID farmachannel --name trazabilidad --signature-policy "OR('ModernoMSP.member','DeliveryMSP.member','LogisticaMSP.member')" --version 1.0 --sequence 1 --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt --peerAddresses localhost:2051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/delivery.farma.com/peers/peer0.delivery.farma.com/tls/ca.crt
+
+
+
+peer lifecycle chaincode querycommitted --channelID farmachannel --name trazabilidad --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem
+
+
+
+//probar el chaincode
+
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.farma.com --tls --cafile ${PWD}/organizations/ordererOrganizations/farma.com/orderers/orderer.farma.com/msp/tlscacerts/tlsca.farma.com-cert.pem -C farmachannel -n trazabilidad --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/moderno.farma.com/peers/peer0.moderno.farma.com/tls/ca.crt -c '{"function":"initLedger","Args":[""]}'
+
+peer chaincode query -C farmachannel -n trazabilidad -c '{"Args":["GetAllFarmacos",""]}'
